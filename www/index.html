@@ -197,9 +197,15 @@ $('export').onclick=async()=>{
     const out=await doc.save(),name='ban-ve-da-xoa.pdf';
     const cap=window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform();
     if(cap){
-      const b64=await new Promise(ok=>{const fr=new FileReader();fr.onload=()=>ok(fr.result.split(',')[1]);fr.readAsDataURL(new Blob([out]))});
       const {Filesystem,Share}=Capacitor.Plugins;
-      const r=await Filesystem.writeFile({path:name,data:b64,directory:'CACHE'});
+      // Ghi từng đoạn nhỏ (bội số của 3 byte để ghép base64 đúng) -> tránh tràn RAM ở cầu nối
+      const CH=3*128*1024;let r;
+      for(let o=0,first=true;o<out.length;o+=CH,first=false){
+        const part=await new Promise(ok=>{const fr=new FileReader();fr.onload=()=>ok(fr.result.split(',')[1]);fr.readAsDataURL(new Blob([out.subarray(o,o+CH)]))});
+        if(first)r=await Filesystem.writeFile({path:name,data:part,directory:'CACHE'});
+        else await Filesystem.appendFile({path:name,data:part,directory:'CACHE'});
+        btn.textContent='Đang ghi '+Math.min(100,Math.round((o+CH)/out.length*100))+'%';
+      }
       await Share.share({title:name,url:r.uri,dialogTitle:'Lưu / gửi file PDF'});
     }else{
       const u=URL.createObjectURL(new Blob([out],{type:'application/pdf'})),a=document.createElement('a');
