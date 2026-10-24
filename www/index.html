@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Xoá khung tên PDF</title>
+<style>
+:root{--ink:#1b1f23;--paper:#f6f5f2;--line:#d8d5cc;--accent:#2f5d50;--danger:#a5402f;--muted:#6b6f76}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{font-family:system-ui,Roboto,Arial,sans-serif;background:var(--paper);color:var(--ink);display:flex;flex-direction:column;overflow:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+header{padding:10px 12px;background:#fff;border-bottom:1px solid var(--line);font-weight:600;font-size:15px}
+.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;background:#fff;border-bottom:1px solid var(--line)}
+button,select,input[type=text],input[type=number]{font:inherit;font-size:14px;border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 11px;border-radius:8px;min-height:38px}
+button:disabled{opacity:.4}
+button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+button.sm{padding:4px 9px;min-height:30px;font-size:12px}
+.file{display:inline-block;padding:8px 12px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;font-size:14px}
+.file input{display:none}
+#pg{width:62px;text-align:center}
+#range{flex:1;min-width:110px}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.lbl{font-size:12px;color:var(--muted)}
+#viewer{flex:1;overflow:auto;background:#e9e7e1;padding:10px;-webkit-overflow-scrolling:touch}
+.page-wrap{position:relative;margin:0 auto;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.2);line-height:0;width:max-content}
+canvas{display:block}
+#overlay{position:absolute;inset:0;touch-action:none;cursor:crosshair}
+#overlay.pan{pointer-events:none}
+.rb{position:absolute;border:2px dashed var(--danger);background:rgba(165,64,47,.2);pointer-events:none}
+.rb.c{border-style:solid}
+.rb.off{opacity:.25}
+.rb b{position:absolute;top:0;left:0;background:var(--danger);color:#fff;font:600 11px/1 sans-serif;padding:2px 4px}
+#ph{color:var(--muted);text-align:center;margin:60px auto;max-width:320px;font-size:14px;line-height:1.5}
+details{background:#fff;border-top:1px solid var(--line);padding:6px 10px;max-height:34vh;overflow:auto}
+summary{font-weight:600;font-size:14px;padding:6px 0}
+.sel{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;font-size:13px}
+.sel i{width:14px;height:14px;border:1px solid var(--line);border-radius:3px;flex:none}
+.sel span{flex:1}
+.sel input{width:110px;min-height:30px;padding:3px 7px;font-size:13px}
+#toast{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:#222;color:#fff;padding:9px 14px;border-radius:20px;font-size:13px;display:none;max-width:90%;text-align:center}
+</style>
+</head>
+<body>
+<header>Xoá khung tên PDF</header>
+<div class="bar">
+  <label class="file">Mở PDF<input type="file" id="fileInput" accept="application/pdf"></label>
+  <button id="prev" disabled>◀</button>
+  <input type="number" id="pg" min="1" value="1" disabled><span class="lbl" id="tot">/ –</span>
+  <button id="next" disabled>▶</button>
+  <button id="zo" disabled>−</button><button id="zi" disabled>+</button>
+  <button id="mode" disabled>✏️ Vẽ</button>
+  <input type="color" id="color" value="#ffffff" style="width:40px;height:38px;padding:2px">
+</div>
+<div class="bar">
+  <span class="lbl">Xoá ở trang:</span>
+  <input type="text" id="range" placeholder="vd: 1-5, 8, 10-  (để trống = tất cả)" inputmode="text">
+  <div class="chips">
+    <button class="sm" data-r="">Tất cả</button>
+    <button class="sm" data-r="cur">Trang này</button>
+    <button class="sm" data-r="odd">Lẻ</button>
+    <button class="sm" data-r="even">Chẵn</button>
+  </div>
+</div>
+<div id="viewer"><div id="ph">Mở file PDF, chọn trang cần xoá (giống khi in: <b>1-5, 8, 10-</b>), rồi kéo trên trang để vẽ vùng cần xoá. Muốn cuộn/di chuyển trang thì bấm nút <b>✏️ Vẽ</b> để chuyển sang <b>✋ Cuộn</b>.</div></div>
+<details open>
+  <summary>Các vùng đã chọn (<span id="cnt">0</span>)</summary>
+  <div id="list"></div>
+  <div class="bar" style="padding:6px 0;border:0">
+    <button id="undo" disabled>Hoàn tác</button>
+    <button id="clear" disabled>Xoá hết vùng</button>
+    <button id="export" class="primary" disabled>Xuất PDF mới</button>
+  </div>
+</details>
+<div id="toast"></div>
+<script>
+// Nạp thư viện: ưu tiên bản kèm trong app (offline), dự phòng CDN
+function load(src,fb){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>{if(!fb)return no();const t=document.createElement('script');t.src=fb;t.onload=ok;t.onerror=no;document.head.appendChild(t)};document.head.appendChild(s)})}
+const CDN='https://cdnjs.cloudflare.com/ajax/libs/';
+const ready=Promise.all([
+  load('lib/pdf.min.js',CDN+'pdf.js/3.11.174/pdf.min.js'),
+  load('lib/pdf-lib.min.js',CDN+'pdf-lib/1.17.1/pdf-lib.min.js')
+]).then(()=>{pdfjsLib.GlobalWorkerOptions.workerSrc=(window.Capacitor||location.protocol==='file:')?'lib/pdf.worker.min.js':CDN+'pdf.js/3.11.174/pdf.worker.min.js'});
+
+const $=id=>document.getElementById(id);
+let pdf=null,bytes=null,cur=1,total=0,scale=1,sels=[],canvas,overlay,wrap,panMode=false;
+
+function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',2800)}
+
+// Phân tích dải trang kiểu in ấn. Trả về Set số trang, hoặc null = tất cả
+function parseRange(str,n){
+  str=(str||'').trim().toLowerCase();
+  if(!str||str==='all'||str==='tat ca'||str==='tất cả')return null;
+  const out=new Set();
+  for(const tk of str.split(/[,;\s]+/).filter(Boolean)){
+    let m;
+    if(tk==='odd'||tk==='le'||tk==='lẻ'){for(let i=1;i<=n;i+=2)out.add(i)}
+    else if(tk==='even'||tk==='chan'||tk==='chẵn'){for(let i=2;i<=n;i+=2)out.add(i)}
+    else if((m=tk.match(/^(\d*)\s*[-–]\s*(\d*)$/))&&(m[1]||m[2])){
+      const a=m[1]?+m[1]:1,b=m[2]?+m[2]:n;
+      if(a<1||a>n||b<a)throw new Error('Dải trang không hợp lệ: '+tk);
+      for(let i=a;i<=Math.min(b,n);i++)out.add(i)
+    }else if(/^\d+$/.test(tk)){const v=+tk;if(v<1||v>n)throw new Error('Trang '+v+' không tồn tại (PDF có '+n+' trang)');out.add(v)}
+    else throw new Error('Không hiểu: "'+tk+'"');
+  }
+  return out;
+}
+const inRange=(s,p)=>!s.pages||s.pages.has(p);
+
+document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{
+  const r=b.dataset.r;$('range').value=r==='cur'?String(cur):r==='odd'?'lẻ':r==='even'?'chẵn':''});
+
+$('fileInput').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{await ready}catch{return toast('Không nạp được thư viện PDF (cần mạng lần đầu nếu chưa đóng gói)')}
+  const buf=await f.arrayBuffer();bytes=buf.slice(0);
+  try{pdf=await pdfjsLib.getDocument({data:buf.slice(0)}).promise}catch(err){return toast('Không mở được PDF: '+err.message)}
+  total=pdf.numPages;cur=1;sels=[];
+  $('ph').style.display='none';
+  ['prev','next','zi','zo','mode','pg'].forEach(i=>$(i).disabled=false);
+  $('pg').max=total;$('tot').textContent='/ '+total;
+  const p1=await pdf.getPage(1);
+  scale=(($('viewer').clientWidth-20)/p1.getViewport({scale:1}).width);
+  refreshList();render();
+};
+$('prev').onclick=()=>go(cur-1);$('next').onclick=()=>go(cur+1);
+$('pg').onchange=()=>go(parseInt($('pg').value)||cur);
+$('zi').onclick=()=>{scale*=1.25;render()};$('zo').onclick=()=>{scale/=1.25;render()};
+$('mode').onclick=()=>{panMode=!panMode;$('mode').textContent=panMode?'✋ Cuộn':'✏️ Vẽ';$('mode').classList.toggle('on',panMode);if(overlay)overlay.classList.toggle('pan',panMode)};
+function go(p){if(p<1||p>total){$('pg').value=cur;return}cur=p;render()}
+
+async function render(){
+  $('pg').value=cur;
+  const page=await pdf.getPage(cur),vp=page.getViewport({scale}),dpr=Math.min(window.devicePixelRatio||1,2);
+  $('viewer').querySelectorAll('.page-wrap').forEach(x=>x.remove());
+  wrap=document.createElement('div');wrap.className='page-wrap';
+  canvas=document.createElement('canvas');
+  canvas.width=Math.floor(vp.width*dpr);canvas.height=Math.floor(vp.height*dpr);
+  canvas.style.width=vp.width+'px';canvas.style.height=vp.height+'px';
+  overlay=document.createElement('div');overlay.id='overlay';if(panMode)overlay.classList.add('pan');
+  wrap.append(canvas,overlay);$('viewer').appendChild(wrap);
+  await page.render({canvasContext:canvas.getContext('2d'),viewport:page.getViewport({scale:scale*dpr})}).promise;
+  bind();draw();
+}
+
+let ds=null,db=null;
+function bind(){
+  overlay.onpointerdown=e=>{
+    const r=overlay.getBoundingClientRect();ds={x:e.clientX-r.left,y:e.clientY-r.top};
+    db=document.createElement('div');db.className='rb';overlay.appendChild(db);overlay.setPointerCapture(e.pointerId);e.preventDefault()};
+  overlay.onpointermove=e=>{
+    if(!ds)return;const r=overlay.getBoundingClientRect();
+    const x=Math.min(Math.max(e.clientX-r.left,0),r.width),y=Math.min(Math.max(e.clientY-r.top,0),r.height);
+    Object.assign(db.style,{left:Math.min(ds.x,x)+'px',top:Math.min(ds.y,y)+'px',width:Math.abs(x-ds.x)+'px',height:Math.abs(y-ds.y)+'px'})};
+  overlay.onpointerup=e=>{
+    if(!ds)return;const r=overlay.getBoundingClientRect();
+    const x=Math.min(Math.max(e.clientX-r.left,0),r.width),y=Math.min(Math.max(e.clientY-r.top,0),r.height);
+    const a=ds;ds=null;db.remove();db=null;
+    if(Math.abs(x-a.x)<8||Math.abs(y-a.y)<8)return;
+    let pages;try{pages=parseRange($('range').value,total)}catch(err){return toast(err.message)}
+    sels.push({x0:Math.min(a.x,x)/r.width,y0:Math.min(a.y,y)/r.height,x1:Math.max(a.x,x)/r.width,y1:Math.max(a.y,y)/r.height,
+      color:$('color').value,txt:$('range').value.trim(),pages});
+    refreshList();draw()};
+  overlay.onpointercancel=()=>{if(db)db.remove();ds=db=null};
+}
+function draw(){
+  if(!overlay)return;overlay.querySelectorAll('.c').forEach(x=>x.remove());
+  const W=canvas.clientWidth,H=canvas.clientHeight;
+  sels.forEach((s,i)=>{const d=document.createElement('div');d.className='rb c'+(inRange(s,cur)?'':' off');
+    Object.assign(d.style,{left:s.x0*W+'px',top:s.y0*H+'px',width:(s.x1-s.x0)*W+'px',height:(s.y1-s.y0)*H+'px',borderColor:s.color==='#ffffff'?'#a5402f':s.color,background:s.color+'55'});
+    d.innerHTML='<b>'+(i+1)+'</b>';overlay.appendChild(d)})
+}
+function refreshList(){
+  $('cnt').textContent=sels.length;const L=$('list');L.innerHTML='';
+  ['undo','clear','export'].forEach(i=>$(i).disabled=!sels.length);
+  sels.forEach((s,i)=>{
+    const r=document.createElement('div');r.className='sel';
+    r.innerHTML='<i style="background:'+s.color+'"></i><span>Vùng '+(i+1)+'</span>';
+    const inp=document.createElement('input');inp.type='text';inp.value=s.txt;inp.placeholder='tất cả trang';
+    inp.onchange=()=>{try{s.pages=parseRange(inp.value,total);s.txt=inp.value.trim();draw()}catch(err){toast(err.message);inp.value=s.txt}};
+    const d=document.createElement('button');d.className='sm';d.textContent='Xoá';
+    d.onclick=()=>{sels.splice(i,1);refreshList();draw()};
+    r.append(inp,d);L.appendChild(r)})
+}
+$('undo').onclick=()=>{sels.pop();refreshList();draw()};
+$('clear').onclick=()=>{sels=[];refreshList();draw()};
+
+const hex=h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16)/255);
+$('export').onclick=async()=>{
+  const btn=$('export');btn.disabled=true;btn.textContent='Đang xử lý...';
+  try{
+    const {PDFDocument,rgb}=PDFLib,doc=await PDFDocument.load(bytes.slice(0));let n=0;
+    doc.getPages().forEach((pg,idx)=>{
+      const {width:w,height:h}=pg.getSize();
+      sels.forEach(s=>{if(!inRange(s,idx+1))return;n++;const [r,g,b]=hex(s.color);
+        pg.drawRectangle({x:s.x0*w,y:h-s.y1*h,width:(s.x1-s.x0)*w,height:(s.y1-s.y0)*h,color:rgb(r,g,b),borderWidth:0})})});
+    const out=await doc.save(),name='ban-ve-da-xoa.pdf';
+    const cap=window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform();
+    if(cap){
+      const b64=await new Promise(ok=>{const fr=new FileReader();fr.onload=()=>ok(fr.result.split(',')[1]);fr.readAsDataURL(new Blob([out]))});
+      const {Filesystem,Share}=Capacitor.Plugins;
+      const r=await Filesystem.writeFile({path:name,data:b64,directory:'CACHE'});
+      await Share.share({title:name,url:r.uri,dialogTitle:'Lưu / gửi file PDF'});
+    }else{
+      const u=URL.createObjectURL(new Blob([out],{type:'application/pdf'})),a=document.createElement('a');
+      a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),10000)}
+    toast('Đã xử lý '+n+' lượt xoá');
+  }catch(err){toast('Xuất thất bại: '+err.message)}
+  btn.disabled=false;btn.textContent='Xuất PDF mới';
+};
+</script>
+</body>
+</html>
